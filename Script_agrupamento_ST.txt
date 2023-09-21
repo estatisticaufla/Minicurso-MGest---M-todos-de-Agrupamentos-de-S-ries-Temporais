@@ -1,0 +1,302 @@
+# Análise de Agrupamento em Séries Temporais
+
+# Exemplo 1
+
+library(dtw)
+
+X<-sample(30)
+Y<-sample(30)
+
+alinhamento<-dtw(X,Y, step =asymmetricP1, keep = TRUE,
+                 match.col = "blue");
+dtwPlotThreeWay(alinhamento, xlab = "X", ylab = "Y", main = "")
+
+
+# Exemplo 2
+
+# Cluster séries temporais
+
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+library(reshape)
+
+#####
+
+library(dtwclust)
+
+acoes<-read.csv(url('http://www-usr.inf.ufsm.br/~joaquim/book_datasets/acoes_close2019.csv'))
+head(acoes)
+
+acoes<-t(as.matrix(acoes))
+
+distancia<-dist(acoes, method = 'DTW')
+summary(distancia)
+
+hc<-hclust(distancia)
+plot(hc, ylab = "Altura", xlab = "Grupo de ações", main = NULL)
+
+
+acoes.cor<-as.dist(1 - cor(t(acoes)))
+hc.cor<-hclust(acoes.cor, method = "complete",members = NULL)
+plot(hc.cor, ylab = "Altura", xlab = "Grupo de ações", main = NULL)
+
+# Exemplo 3
+
+library(dtwclust)
+library(TSclust)
+library(lattice)
+
+data(interest.rates) # taxas de juros
+juros<-interest.rates
+head(juros)
+
+juros <- zoo(juros, index(juros))
+
+xyplot(juros,layout = c(3,6),xlab = "Período",ylab = "",main = "",
+       col = 'darkblue', lwd = 2)
+
+juros<-data.frame(juros)
+
+juros<-ts(as.matrix(juros))
+
+distancia<-dist(juros,method = "DTW")
+summary(distancia)
+
+clust.pam <- tsclust(juros, type="partitional", 
+                     k=3L, distance="dtw", clustering="pam")
+
+plot(clust.pam, type = "sc")
+plot(clust.pam, type = "sc", clus = 1L)
+
+# L2 (Euclidiana)
+
+clust.pam2 <- tsclust(juros, type="partitional", 
+                     k=3L, distance="L2", clustering="pam")
+
+plot(clust.pam, type = "sc", clus = 1L)
+
+# cluster hierárquico
+
+juros1<-t(as.matrix(juros))
+
+distancia1<-dist(juros1, method = 'DTW')
+
+hc<-hclust(distancia1)
+par(mfrow = c(2,1))
+plot(hc, ylab = "Altura", xlab = "Grupo de países", main = NULL)
+
+distancia2<-dist(juros1, method = 'L2')
+hc2<-hclust(distancia2)
+
+plot(hc2, ylab = "Altura", xlab = "Grupo de países", main = NULL)
+
+# Exemplo 4
+
+# Séries temporais de câmbio América Latina
+
+library(tidyverse)
+library(dtwclust) # clusterizacao de series temporais
+library(lattice)
+library(zoo)
+
+moedas <- c("USD/ARS", "USD/VEF", "USD/BOB",
+            "USD/BRL", "USD/CLP", "USD/COP", 
+            "USD/FKP", "USD/PYG", "USD/GYD",
+            "USD/PEN", "USD/UYU", "USD/SRD")
+
+df_moedas <- readr::read_csv("https://raw.githubusercontent.com/sillasgonzaga/curso_series_temporais/master/data/moedas.csv")
+head(df_moedas)
+
+moedas_norm <- scale(df_moedas[,-1])
+
+df_moedas1 <- zoo(moedas_norm, index(moedas_norm))
+
+xyplot(df_moedas1,layout = c(2,6),xlab = "Período",ylab = "",main = "",
+       col = 'darkblue', lwd = 2)
+
+moedas_norm %>% 
+  as.data.frame() %>% 
+  # transformar data frame em formato tidy (long)
+  mutate(ind = row_number()) %>% 
+  gather(moeda, cotacao_norm, -ind) %>% 
+  ggplot(aes(x = ind, y = cotacao_norm)) + 
+  geom_point() +
+  geom_smooth(method = "loess", se = FALSE) +
+  facet_wrap(~ moeda, scale ="free_y")
+
+modelo <- tsclust(t(moedas_norm), 
+                  k = 3, distance = "dtw_lb",
+                  centroid = "pam", 
+                  seed = 123,
+                  trace = TRUE,
+                  control = partitional_control(pam.precompute = FALSE),
+                  args = tsclust_args(dist = list(window.size = 20L)))
+
+plot(modelo)
+
+# Em qual cluster o Real foi alocado?
+
+(cl_br <- (modelo@cluster[which(colnames(moedas_norm) == "USD.BRL")]))
+
+#  contar quantos paises ficaram no mesmo cluster do Brasil
+
+colnames(moedas_norm)[which(modelo@cluster == cl_br)]
+
+# filtrar paises do mesmo cluster
+
+cl_br <- as.data.frame(moedas_norm[, which(modelo@cluster == cl_br)])
+
+cl_br %>% 
+  mutate(indice = 1:n()) %>% 
+  gather(moeda, cotacao_norm, -indice) %>% 
+  ggplot(aes(x = indice, y = cotacao_norm)) +
+  geom_line() + 
+  geom_smooth(se = FALSE) +
+  facet_wrap( ~ moeda, scales = "free")
+
+####
+
+library(gridExtra)
+
+cluster_dtw_h <- dtwclust::tsclust(t(moedas_norm), type = "h", k = 3L,
+                                    preproc = zscore,
+                                    distance = "dtw", centroid = shape_extraction,
+                                    control = hierarchical_control(method = "complete"))
+
+hclus <- stats::cutree(cluster_dtw_h, k = 3) %>% 
+  as.data.frame(.) %>%
+  dplyr::rename(.,cluster_group = .) %>%
+  tibble::rownames_to_column("type_col")
+
+hcdata <- ggdendro::dendro_data(cluster_dtw_h)
+names_order <- hcdata$labels$label
+
+p1 <- hcdata %>%
+  ggdendro::ggdendrogram(., rotate=T, leaf_labels=FALSE)
+
+p1
+
+moedas<-data.frame(moedas_norm)
+
+p2 <- moedas %>%
+  
+  dplyr::mutate(index = 1:179) %>%
+  tidyr::gather(key = type_col,value = value, -index) %>%
+  dplyr::full_join(., hclus, by = "type_col") %>% 
+  mutate(type_col = factor(type_col, levels = rev(as.character(names_order)))) %>% 
+  ggplot(aes(x = index, y = value, colour = cluster_group)) +
+  geom_line() +
+  facet_wrap(~type_col, ncol = 1, strip.position="left") + 
+  guides(color=FALSE) +
+  theme_bw() + 
+  theme(strip.background = element_blank(), strip.text = element_blank())
+
+gp1<-ggplotGrob(p1)
+gp2<-ggplotGrob(p2) 
+
+grid.arrange(gp2, gp1, ncol=2, widths=c(4,2))
+
+# Exemplo 5 Fuzz c-means
+
+acf_fun <- function(series, ...) {
+  lapply(series, function(x) {
+    as.numeric(acf(x, lag.max = 50, plot = FALSE)$acf)
+  })
+}
+
+fc <- tsclust(moedas_norm, type = "f", k = 3L,
+              preproc = acf_fun, distance = "L2",
+              seed = 42)
+
+fc@fcluster
+plot(fc, series = moedas_norm, type = "series")
+
+# Exemplo 6 - avaliação dos agrupamentos
+
+
+cvi(clust.pam)
+cvi(clust.pam2)
+
+# Exemplo 6 k-means
+
+# Usando K-means
+
+library(tidyverse)
+library(lubridate)
+library(pwt9)
+
+pwt <- pwt9.0 %>%
+  select(country, year, avh)
+
+# avh - média de horas trabalhadas para um determinado país e ano
+
+head(pwt)
+tail(pwt)
+
+# valores NA's
+
+pwt_wide <- pwt %>%
+  pivot_wider(names_from = year, values_from = avh)  %>%
+  filter(!is.na(`1950`)) %>%
+  mutate_at(vars(-country), as.numeric)
+
+head(pwt_wide)
+
+# número de clusters
+
+theme_blog <- function(){
+  theme_minimal() +
+    theme(legend.position = "bottom",
+          legend.text = element_text(colour = "black"),
+          legend.title = element_text(colour = "white"),
+          plot.background = element_rect("white"),
+          plot.title = element_text(colour = "black"),
+          panel.grid = element_line(colour = "black"),
+          axis.text = element_text(colour = "black"),
+          axis.title = element_text(colour = "black"),
+          strip.text = element_text(colour = "black"))}
+
+wss <- map_dbl(1:5, ~{kmeans(select(pwt_wide, -country), ., nstart=50,iter.max = 15 )$tot.withinss})
+n_clust <- 1:5
+elbow_df <- as.data.frame(cbind("n_clust" = n_clust, "wss" = wss))
+ggplot(elbow_df) +
+  geom_line(aes(y = wss, x = n_clust), colour = "blue", lwd = 1) +
+  theme_blog()
+
+clusters <- kmeans(select(pwt_wide, -country), centers = 3)
+(centers <- rownames_to_column(as.data.frame(clusters$centers), "cluster"))
+
+pwt_wide <- pwt_wide %>% 
+  mutate(cluster = clusters$cluster)
+
+pwt_long <- pwt_wide %>%
+  pivot_longer(cols=c(-country, -cluster), names_to = "year", values_to = "avh") %>%
+  mutate(year = ymd(paste0(year, "-01-01")))
+
+centers_long <- centers %>%
+  pivot_longer(cols = -cluster, names_to = "year", values_to = "avh") %>%  
+  mutate(year = ymd(paste0(year, "-01-01")))
+
+ggplot() +
+  geom_line(data = pwt_long, aes(y = avh, x = year, group = country), colour = "#82518c") +
+  facet_wrap(~cluster, nrow = 1) + 
+  geom_line(data = centers_long, aes(y = avh, x = year, group = cluster), col = "#b58900", size = 2) +
+  theme_blog() + 
+  theme(plot.caption = element_text(colour = "white"))
+
+clusters[1]$names
+centers$names
+
+
+ggplot() +
+  geom_line(data = pwt_long, aes(y = avh, x = year, group = country), colour = "#82518c") +
+  facet_wrap(~cluster, nrow = 1) + 
+  geom_line(data = centers_long, aes(y = avh, x = year, group = cluster), col = "#b58900", size = 2) +
+  theme_blog() +
+  labs(title = "Média de horas trabalhadas por país", 
+       caption = "Cluster 1: Belgium, Switzerland, Germany, Denmark, France, Luxembourg, Netherlands,
+                 Norway, Sweden.\nCluster 2: Australia, Colombia, Ireland, Iceland, Japan, Mexico,
+                 Portugal, Turkey.\nCluster 3: Argentina, Austria, Brazil, Canada, Cyprus, Spain, Finland,
+                 UK, Italy, New Zealand, Peru, USA, Venezuela") +
+  theme(plot.caption = element_text(colour = "blue"))
